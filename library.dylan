@@ -17,7 +17,6 @@ define module paths
       path-relative?,
       path-absolute?,
       split-path,               // => dirname, basename, drive
-      split-extension,          // => base, extension
       join-paths,
       make-absolute,
       make-relative,

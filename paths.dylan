@@ -8,11 +8,10 @@ Author: Carl Gay
 // thing and storing parts of the path in class slots we just do
 // string operations when parts are requested.
 
-define constant $drive-separator :: <character> = ':';
-define constant $directory-separator :: <character> = '/';
-define constant $extension-separator :: <character> = '.';
-define constant $current-directory :: <string> = ".";
-define constant $parent-directory :: <string> = "..";
+// All functions are defined such that if a <path> is passed in,
+// <path>s are returned, and if a <string> is passed in, <string>s are
+// returned.
+
 
 define class <path-error> (<simple-condition>, <error>)
 end;
@@ -31,75 +30,149 @@ define method make
   else
     next-method()
   end
-end;
+end method make;
 
 define inline method as
     (class :: subclass(<string>), path :: <path>) => (pathname :: <string>)
   path.%string
-end;
+end method as;
 
 define sealed class <posix-path> (<path>)
 end;
 
 define method path-drive
     (path :: <posix-path>) => (drive == #f)
-  #f  // posix
-end;
+  #f
+end method path-drive;
 
 define method path-directory
     (path :: <posix-path>) => (directory :: <string>)
   split-path(path)  // just use 1st return value
-end;
+end method path-directory;
+
+define method path-directory
+    (path :: <string>) => (directory :: <string>)
+  split-path(path)  // just use 1st return value
+end method path-directory;
 
 define method path-basename
     (path :: <posix-path>) => (basename :: <string>)
-  make-path(path-basename(path.%string))
-end;
+  let (_, basename) = split-path(path);
+  basename
+end method path-basename;
 
 define method path-basename
     (path :: <string>) => (basename :: <string>)
   let (_, basename) = split-path(path);
   basename
-end;
+end method path-basename;
 
 define method split-path
     (path :: <posix-path>) => (directory :: <string>, basename :: <path>)
   let (dir, base) = split-path(path.%string);
-  values(make-path(dir), make-path(base))
-end;
+  values(make(<posix-path>, string: dir),
+         make(<posix-path>, string: base))
+end method split-path;
 
 define method split-path
     (path :: <string>) => (directory :: <string>, basename :: <path>)
-  let sep = rfind(path, $directory-separator);
+  let sep = rfind(path, '/');
   case
     sep = 0 => values(path, copy-sequence(path, start: 1));
-    sep => apply(values, split(path, $directory-separator, count: 2, start: sep));
+    sep => apply(values, split(path, '/', count: 2, start: sep));
     otherwise => values("", path);
   end
-end;
-
-// Hmmm.  Many of these methods should return paths, perhaps with
-// internal versions that return strings.
+end method split-path;
 
 define method path-extension
-    (path :: <posix-path>) => (directory :: <string>)
-  let %path = path.%string;
-  let dir = rfind(%path, $directory-separator) | -1;
-  let ext = rfind(%path, $extension-separator) | -1;
+    (path :: <posix-path>) => (extension :: <string>)
+  path-extension(path.%string)
+end method path-extension;
+
+define method path-extension
+    (path :: <string>) => (extension :: <string>)
+  let dir = rfind(path, '/') | -1;
+  let ext = rfind(path, '.') | -1;
   if (ext > dir)
-    copy-sequence(%path, start: ext)
+    copy-sequence(path, start: ext + 1)
   else
     ""
   end
-end;
+end method path-extension;
 
 define method path-absolute?
-    (path :: <posix-path>) => (relative? :: <boolean>)
-  let %path = path.%string;
-  starts-with(%path, $directory-separator)
-end;
+    (path :: <posix-path>) => (absolute? :: <boolean>)
+  path-absolute?(path.%string)
+end method path-absolute?;
+
+define method path-absolute?
+    (path :: <string>) => (absolute? :: <boolean>)
+  starts-with?(path, "/")
+end method path-absolute?;
 
 define method path-relative?
-    (path :: <posix-path>) => (absolute? :: <boolean>)
+    (path :: <posix-path>) => (relative? :: <boolean>)
   ~path-absolute?(path)
-end;
+end method path-relative?;
+
+define method path-relative?
+    (path :: <string>) => (relative? :: <boolean>)
+  ~path-absolute?(path)
+end method path-relative?;
+
+define method normalize-path
+    (path :: <path>) => (normpath :: <path>)
+  make(<posix-path>, string: normalize-path(path.%string))
+end method normalize-path;
+
+define method normalize-path
+    (path :: <string>) => (normpath :: <string>)
+  if (path.empty?)
+    ""
+  else
+    let initial-slashes = starts-with?(path, "/") & 1;
+    if (initial-slashes & starts-with?(path, "//") & ~starts-with?(path, "///"))
+      initial-slashes := 2;
+    end;
+    iterate loop (comps = split(path, '/'), new = #())
+      if (comps.empty?)
+        let newpath = join(reverse!(new), "/");
+        if (initial-slashes = 2)
+          concatenate("//", newpath)
+        elseif (initial-slashes)
+          concatenate("/", newpath)
+        elseif (newpath.empty?)
+          "."
+        else
+          newpath
+        end
+      else
+        let comp = comps[0];
+        if (comp = "" | comp = ".")
+          loop(comps.tail, new)
+        elseif (comp ~= ".."
+                  | (~initial-slashes & new.empty?)
+                  | (~new.empty? & new.head = ".."))
+          loop(comps.tail, pair(comp, new))
+        elseif (~new.empty?)
+          loop(comps.tail, new.tail)
+        else
+          loop(comps.tail, new)
+        end if
+      end if
+    end iterate
+  end if
+end method normalize-path;
+
+//// Utilities/helpers
+
+define function rfind
+    (big :: <string>, char :: <character>) => (index :: false-or(<integer>))
+  iterate loop (i = big.size - 1)
+    case
+      i < 0 => #f;
+      big[i] = char => i;
+      otherwise => loop(i - 1);
+    end
+  end
+end function rfind;
